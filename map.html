@@ -379,6 +379,7 @@
         var modded;
         var difficulty;
         var room;
+        var switched;
         function pushState(noNavigation) {
             let changes = false;
             let modded_param = params.get("modded") == 'on';
@@ -461,6 +462,78 @@
         }
 
         var focusedRoom;
+        function findAndSwitchToGateConnection(gateName) {
+            const regionAcronyms = Object.keys(slugcats[difficulty].regions);
+            let found = false;
+            let regionsToSearch = regionAcronyms.filter(r => r !== region);
+
+            function searchNextRegion(index) {
+                if (index >= regionsToSearch.length || found) {
+                    if (!found) console.log(`Gate connection not found after checking all available regions.`);
+                    return;
+                }
+
+                const regionAcronym = regionsToSearch[index];
+                
+                getRegionData(difficulty, regionAcronym, function(finalRegionData) {
+                    if (found) return;
+
+                    if (finalRegionData) {
+                        const jsonString = JSON.stringify(finalRegionData);
+                        const searchString = `"name":"${gateName}"`;
+
+                        if (jsonString.includes(searchString)) {
+                            found = true;
+                            console.log(`Found gate ${gateName} in region ${regionAcronym}. Switching.`);
+                            
+                            region = regionAcronym;
+                            room = gateName;
+                            switched = true;
+                            pushState();
+                            newState();
+                        } else {
+                            searchNextRegion(index + 1);
+                        }
+                    } else {
+                        searchNextRegion(index + 1);
+                    }
+                });
+            }
+
+            // Start the sequential search chain.
+            searchNextRegion(0);
+        }
+
+        function getRegionData(slugcat, regionAcronym, callback) {
+            var slugcat_url = {
+                "artificer": "https://raw.githubusercontent.com/rain-world-map/msc/main/artificer",
+                "gourmand": "https://raw.githubusercontent.com/rain-world-map/msc/main/gourmand",
+                "rivulet": "https://raw.githubusercontent.com/rain-world-map/msc/main/rivulet",
+                "saint": "https://raw.githubusercontent.com/rain-world-map/msc/main/saint",
+                "spear": "https://raw.githubusercontent.com/rain-world-map/msc/main/spear",
+                "white": "https://raw.githubusercontent.com/rain-world-map/vanilla/main/white",
+                "yellow": "https://raw.githubusercontent.com/rain-world-map/vanilla/main/yellow",
+                "red": "https://raw.githubusercontent.com/rain-world-map/vanilla/main/red",
+            };
+            const region_url = regionAcronym.toLowerCase();
+            const initialPath = `${slugcat_url[slugcat]}/${region_url}`;
+
+            getJsonObject(`${initialPath}/region.json`, function(json) {
+                if (!json) {
+                    callback(null);
+                    return;
+                }
+
+                if (json && 'copyingrooms' in json) {
+                    const originalSlugcat = json['copyingrooms'];
+                    const finalDataPath = `${slugcat_url[originalSlugcat]}/${region_url}`;
+                    getJsonObject(`${finalDataPath}/region.json`, callback, true);
+                } else {
+                    callback(json);
+                }
+            }, true);
+        }
+
         function focusRoom(e) {
             if (e.target) e = e.target;
             if (e != focusedRoom && focusedRoom) focusedRoom.setStyle(
@@ -468,7 +541,18 @@
                     weight: 0
                 });
             focusedRoom = e;
-            console.log(focusedRoom.feature.properties.name + " focused")
+            let roomName = e.feature.properties.name;
+            if (roomName.startsWith("GATE") && !switched) {
+                console.log("Room is a gate:", roomName);
+                findAndSwitchToGateConnection(roomName);
+                return;
+            } else if (switched) {
+                switched = false; // reset for next time
+            } 
+            else {
+                console.log(focusedRoom.feature.properties.name + " focused")
+            }
+            
             map.fitBounds(e.getBounds());
             updateHilight(); // might not move
             focusedRoom.setStyle(
@@ -585,6 +669,7 @@
             };
             var region_url = region.toLowerCase();
             var roompath = `${slugcat_url[pdifficulty]}/${region_url}`;
+            console.log(`${roompath}/region.json`);
             getJsonObject(`${roompath}/region.json`, function (json) {
                 var roomjson = json;
                 if ('copyingrooms' in json) {
